@@ -1,0 +1,189 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, roc_auc_score, confusion_matrix
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers, Model, Input, optimizers
+
+# Load dataset
+df = pd.read_csv("/content/creditcard.csv")
+
+# Separate features and labels
+X = df.drop(columns=["Class"])
+y = df["Class"].values
+
+# Split into normal and anomaly datasets
+X_normal = X[y == 0].copy()
+X_anom = X[y == 1].copy()
+
+# Train-validation split for normal data
+X_train_norm, X_val_norm = train_test_split(
+    X_normal, test_size=0.2, random_state=42, shuffle=True
+)
+
+# Scale features
+scaler = StandardScaler()
+scaler.fit(X_train_norm)
+X_train = scaler.transform(X_train_norm)
+X_val = scaler.transform(X_val_norm)
+
+# Prepare test data
+X_test_norm = scaler.transform(X_normal.sample(n=min(10000, len(X_normal)), random_state=42))
+X_test_anom = scaler.transform(X_anom)
+X_test = np.vstack([X_test_norm, X_test_anom])
+y_test = np.hstack([np.zeros(len(X_test_norm)), np.ones(len(X_test_anom))])
+
+# Define Autoencoder architecture
+input_dim = X_train.shape[1]
+encoding_dim = 16
+
+inp = Input(shape=(input_dim,), name="encoder_input")
+x = layers.Dense(64, activation="relu")(inp)
+x = layers.Dense(32, activation="relu")(x)
+latent = layers.Dense(encoding_dim, activation="relu", name="latent")(x)
+x = layers.Dense(32, activation="relu")(latent)
+x = layers.Dense(64, activation="relu")(x)
+out = layers.Dense(input_dim, activation="linear", name="reconstruction")(x)
+
+autoencoder = Model(inputs=inp, outputs=out, name="autoencoder")
+encoder = Model(inputs=inp, outputs=latent, name="encoder")
+
+# Compile model
+autoencoder.compile(optimizer=optimizers.Adam(learning_rate=1e-3), loss="mse")
+autoencoder.summary()
+
+# Train the Autoencoder
+history = autoencoder.fit(
+    X_train, X_train,
+    epochs=50,
+    batch_size=256,
+    validation_data=(X_val, X_val),
+    verbose=2
+)
+
+# Determine threshold from validation reconstruction error
+recon_val = autoencoder.predict(X_val, verbose=0)
+mse_val = np.mean(np.square(recon_val - X_val), axis=1)
+threshold = np.percentile(mse_val, 99)
+print(f"Chosen anomaly threshold (99th percentile of val normal MSE): {threshold:.6f}")
+
+# Evaluate on test data
+recon_test = autoencoder.predict(X_test, verbose=0)
+mse_test = np.mean(np.square(recon_test - X_test), axis=1)
+y_pred = (mse_test > threshold).astype(int)
+
+print("\nClassification report (autoencoder threshold-based):")
+print(classification_report(y_test, y_pred, digits=4))
+
+auc = roc_auc_score(y_test, mse_test)
+print(f"ROC AUC (reconstruction score): {auc:.4f}")
+
+cm = confusion_matrix(y_test, y_pred)
+print("Confusion matrix:\n", cm)
+
+# Plot reconstruction error distributions
+plt.figure(figsize=(8,4))
+plt.hist(mse_test[y_test == 0], bins=50, alpha=0.6, label="Normal (Test)")
+plt.hist(mse_test[y_test == 1], bins=50, alpha=0.6, label="Anomaly (Test)")
+plt.axvline(threshold, color='r', linestyle='--', label='Threshold')
+plt.title("Reconstruction Error (MSE) Distribution")
+plt.xlabel("MSE")
+plt.ylabel("Count")
+plt.legend()
+plt.show()
+
+# Plot training vs validation loss
+plt.figure(figsize=(10,5))
+plt.plot(history.history['loss'], label='Train Loss')
+
+
+
+🎯 Objectives
+
+Understand and implement an unsupervised deep learning method for anomaly detection.
+
+Train an Autoencoder using only normal transactions.
+
+Classify anomalies based on reconstruction error.
+
+Evaluate performance using ROC-AUC, confusion matrix, and classification report.
+
+🧩 Theory
+1. Introduction
+
+Credit card fraud detection is a highly imbalanced classification problem where fraudulent transactions are rare.
+Supervised models need labeled data — often unavailable or insufficient.
+To solve this, an Autoencoder (an unsupervised neural network) is trained to reconstruct normal data.
+Large reconstruction errors indicate anomalies or fraud.
+
+2. Autoencoder Concept
+
+An Autoencoder learns to encode (compress) and decode (reconstruct) data.
+
+Encoder: Compresses input into a smaller latent vector.
+
+Decoder: Reconstructs the original input from this latent vector.
+
+When trained on normal data, it learns normal patterns well — so fraudulent data shows higher reconstruction error.
+
+3. Working Principle
+
+Training Phase:
+
+Train on normal transactions only.
+
+Learn to reconstruct normal patterns.
+
+Validation Phase:
+
+Calculate Mean Squared Error (MSE) between input and output.
+
+Choose a threshold (e.g., 99th percentile) to separate normal vs. anomalies.
+
+Testing Phase:
+
+Apply the threshold on test data.
+
+If MSE > threshold → classify as fraudulent.
+
+⚙️ Algorithm / Steps
+
+Import libraries: TensorFlow, Pandas, NumPy, Scikit-learn.
+
+Load dataset creditcard.csv.
+
+Separate features (X) and labels (y).
+
+Split dataset into normal and anomaly subsets.
+
+Normalize features with StandardScaler.
+
+Build Autoencoder model (Encoder + Decoder).
+
+Compile with Adam optimizer and MSE loss.
+
+Train on normal transactions only.
+
+Calculate reconstruction errors on validation data → set threshold.
+
+Evaluate model on test data using confusion matrix, ROC-AUC, and classification report.
+
+Visualize loss curves and error distribution.
+
+🧠 Applications
+
+Fraud detection in finance & banking
+
+Network intrusion detection
+
+Fault detection in manufacturing
+
+Medical anomaly detection
+
+✅ Conclusion
+
+An Autoencoder-based anomaly detection model can effectively identify fraudulent credit card transactions without using labeled fraud data during training.
+This demonstrates the power of unsupervised deep learning in detecting anomalies within highly imbalanced datasets.
