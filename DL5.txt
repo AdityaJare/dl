@@ -1,0 +1,227 @@
+import numpy as np
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 1) Sample corpus
+corpus = [
+    "machine learning models learn patterns from data",
+    "deep learning uses neural networks for representation learning",
+    "humans learn from experience while machines learn from data",
+    "artificial intelligence combines reasoning and learning capabilities",
+    "supervised learning requires labeled data to train models"
+]
+
+# context window size (left + right)
+window_size = 2
+
+# 2) Tokenization and vocabulary
+tokenizer = Tokenizer()            # default oov_token is None
+tokenizer.fit_on_texts(corpus)
+sequences = tokenizer.texts_to_sequences(corpus)
+word_index = tokenizer.word_index
+index_word = {i: w for w, i in word_index.items()}
+vocab_size = len(word_index) + 1  # +1 for padding index 0
+print("Vocabulary size:", vocab_size)
+
+# 3) Generate context-target pairs (CBOW)
+contexts, targets = [], []
+for seq in sequences:
+    for i, target in enumerate(seq):
+        # left context
+        left = seq[max(0, i - window_size):i]
+        # right context
+        right = seq[i + 1:i + 1 + window_size]
+        context = left + right
+        # pad to fixed length = 2 * window_size, pad pre so recent context is on the right
+        context = pad_sequences([context], maxlen=2 * window_size, padding='pre')[0]
+        contexts.append(context)
+        targets.append(target)
+
+contexts = np.array(contexts)
+targets = np.array(targets)
+print("Training samples:", len(targets))
+
+# 4) Build CBOW model
+embedding_dim = 50  # embedding dimension
+inputs = layers.Input(shape=(2 * window_size,), dtype='int32', name='context_input')
+
+# Important: keep mask_zero=False so index 0 is reserved for padding only.
+# (Masking support can be used but sometimes complicates pooling.)
+embed = layers.Embedding(
+    input_dim=vocab_size,
+    output_dim=embedding_dim,
+    input_length=2 * window_size,
+    name='embedding',
+    mask_zero=False
+)(inputs)
+
+# Average embeddings across the context positions
+avg = layers.GlobalAveragePooling1D()(embed)
+
+# Output: predict the target word (softmax over vocab)
+out = layers.Dense(vocab_size, activation='softmax')(avg)
+
+cbow = keras.Model(inputs=inputs, outputs=out, name='CBOW')
+cbow.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+cbow.summary()
+
+# 5) Train the model (small corpus -> train a bit more or use fewer epochs for quick runs)
+history = cbow.fit(contexts, targets, epochs=100, batch_size=32, verbose=2)
+
+# 6) Extract learned embeddings
+embedding_layer = cbow.get_layer('embedding')
+embedding_weights = embedding_layer.get_weights()[0]  # shape: (vocab_size, embedding_dim)
+
+# 7) Nearest words by cosine similarity
+def nearest(word, k=5):
+    if word not in word_index:
+        return []
+    idx = word_index[word]
+    vec = embedding_weights[idx].reshape(1, -1)
+    sims = cosine_similarity(vec, embedding_weights)[0]
+    # exclude padding (index 0) and the word itself
+    sims[0] = -1
+    sims[idx] = -1
+    topk = sims.argsort()[-k:][::-1]
+    return [(index_word.get(i, "<PAD>"), float(sims[i])) for i in topk]
+
+# 8) Display similar words
+sample_words = ["learning", "data", "models", "humans"]
+for w in sample_words:
+    print(f"\nNearest to '{w}':")
+    for sim_word, score in nearest(w, k=5):
+        print(f" {sim_word:15s} → Similarity: {score:.4f}")
+
+
+
+
+Aim
+
+To implement a Continuous Bag of Words (CBOW) model using TensorFlow and Keras for generating word embeddings and finding semantic similarity between words.
+
+Objectives
+
+Understand how neural networks learn semantic representations of words.
+
+Implement the CBOW model for word embedding generation.
+
+Visualize semantic relationships between words using cosine similarity.
+
+Demonstrate how context helps in predicting the target word in a sentence.
+
+Theory
+1. Introduction to Word Embeddings
+
+In Natural Language Processing (NLP), word embeddings are dense vector representations of words, where semantically similar words have similar vector values.
+They convert words into numerical form suitable for machine learning models.
+
+Popular embedding models:
+
+Word2Vec (CBOW and Skip-Gram)
+
+GloVe
+
+FastText
+
+2. Word2Vec Model
+
+Word2Vec, introduced by Mikolov et al. (2013), is a neural network-based model for learning word embeddings.
+It has two main architectures:
+
+CBOW (Continuous Bag of Words): Predicts a target word based on its surrounding context words.
+
+Skip-Gram: Predicts surrounding context words given a target word.
+
+3. CBOW Architecture
+
+In the CBOW model:
+
+Input: Context words surrounding a target word
+
+Output: The target word
+
+Learning goal: Predict the central (target) word from the context
+
+Example:
+Sentence: "machine learning models learn patterns from data"
+
+Target word: "models"
+
+Context words (window size = 2): [machine, learning, learn, patterns]
+
+The neural network learns to associate these context words with the target word.
+
+4. Cosine Similarity
+
+After training, cosine similarity measures the closeness of two word vectors:
+
+cosine_similarity
+(
+𝐴
+,
+𝐵
+)
+=
+𝐴
+⋅
+𝐵
+∥
+𝐴
+∥
+∥
+𝐵
+∥
+cosine_similarity(A,B)=
+∥A∥∥B∥
+A⋅B
+	​
+
+
+Words with higher cosine similarity are semantically related.
+
+It is commonly used to find nearest words in embedding space.
+
+Algorithm / Steps
+
+Import required libraries (TensorFlow, Keras, NumPy, sklearn).
+
+Define a small corpus of sentences.
+
+Tokenize the text using Tokenizer() and create word-to-index mappings.
+
+Generate context–target pairs based on a chosen window size.
+
+Build the CBOW model:
+
+Input → Embedding → Average Pooling → Dense (Softmax)
+
+Compile the model using Adam optimizer and sparse categorical cross-entropy loss.
+
+Train the model on context–target pairs.
+
+Extract the learned embedding weights.
+
+Compute cosine similarity to find nearest words.
+
+Display semantically similar words for selected examples.
+
+Conclusion
+
+The CBOW model efficiently learns semantic relationships among words using contextual information.
+
+It is a simple but powerful neural approach for building word embeddings.
+
+Forms the foundation for modern NLP systems such as Word2Vec, GloVe, and BERT.
+
+Applications
+
+Text classification and sentiment analysis
+
+Machine translation
+
+Information retrieval and question answering
+
+Chatbots and conversational AI systems
