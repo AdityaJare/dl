@@ -1,0 +1,62 @@
+# Convert test dataset to numpy arrays
+x_test, y_test = ds_to_numpy(test_ds)
+
+# Extract single channel (grayscale)
+x_train = x_train[..., 0]
+x_test = x_test[..., 0]
+
+# Scale pixel values to [0, 1]
+x_train = x_train.astype("float32") / 255.0
+x_test = x_test.astype("float32") / 255.0
+
+# Define the model architecture
+inp = Input(shape=x_train.shape[1:], name="input_image")
+x = layers.Flatten(name="flatten")(inp)
+x = layers.Dense(128, activation="relu", name="dense1")(x)
+x = layers.Dense(64, activation="relu", name="dense2")(x)
+out = layers.Dense(10, activation="softmax", name="preds")(x)
+
+model = Model(inputs=inp, outputs=out, name="ffnn_mnistjpg")
+
+# Compile the model
+sgd = optimizers.SGD(learning_rate=0.01, momentum=0.0)
+model.compile(
+    optimizer=sgd,
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+# Train the model
+history = model.fit(
+    x_train, y_train,
+    epochs=10,
+    batch_size=128,
+    validation_split=0.1,
+    verbose=2
+)
+
+# Evaluate on test set
+test_loss, test_acc = model.evaluate(x_test, y_test, verbose=0)
+print(f"\nTest loss: {test_loss:.4f} | Test accuracy: {test_acc:.4f}")
+
+# Plot training history
+plt.figure(figsize=(12, 4))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history["loss"], label="train loss")
+plt.plot(history.history["val_loss"], label="val loss")
+plt.title("Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history["accuracy"], label="train acc")
+plt.plot(history.history["val_accuracy"], label="val acc")
+plt.title("Accuracy")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.legend()
+
+plt.tight_layout()
+plt.show()
